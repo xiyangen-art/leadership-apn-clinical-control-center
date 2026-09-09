@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>APN Clinical Control Center — Enhanced Prototype</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- React & React-DOM CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  
+  <!-- Babel Compiler for JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <!-- Lucide Icons CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    html, body, #root {
+      height: 100%;
+      min-width: 1024px;
+      margin: 0;
+      background-color: #070b12;
+      color: #f8fafc;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    /* Desktop/laptop responsive density: preserve the command-centre layout while scaling content. */
+    .app-shell { font-size: clamp(11px, 0.72vw, 14px); }
+    @media (max-width: 1366px) { .desktop-grid { gap: 6px !important; padding: 6px !important; } .panel-pad { padding: 7px !important; } }
+    .panel-body-scroll { min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
+    .pod-grid { min-height: 0; align-items: stretch; }
+    .pod-card { min-height: 0; overflow: hidden; }
+    .protocol-footer { flex-shrink: 0; background: #0c1220; padding-top: 8px; }
+    @media (max-height: 850px) { .app-shell { font-size: 11px; } .pod-card { padding: 6px !important; } .pod-identity { padding-top: 5px !important; padding-bottom: 5px !important; } .pod-trend { margin-top: 4px !important; padding: 4px !important; } }
+    @media (min-width: 1800px) { .desktop-grid { max-width: 1920px; width: 100%; margin: 0 auto; } }
+  </style>
+</head>
+<body>
+
+<div id="root"></div>
+
+<script type="text/babel">
+  const { useState, useEffect } = React;
+
+  // --- INITIAL PATIENTS DATA ---
+  const INITIAL_PATIENTS = [
+    {
+      id: 'PAT-101',
+      name: 'Lim, A.',
+      age: 62,
+      gender: 'M',
+      nric: 'S****123A',
+      triageCat: 'P3',
+      riskScore: 88,
+      podId: null,
+      inQueue: true,
+      dwellMinutes: 4,
+      vitals: { hr: 88, bp: '158/94', spO2: 98, temp: '36.8°C', rr: 18 },
+      flagReason: 'Epigastric discomfort + Diabetic History + Atypical ACS pattern',
+      audioStream: {
+        sourceLang: 'Mandarin',
+        transcript: 'Felt sudden tightness in my upper belly and dizziness when walking, spreading slightly to back since 2 hours ago.',
+        highlightKeywords: ['tightness in my upper belly', 'dizziness when walking', 'spreading slightly to back']
+      },
+      soap: {
+        subjective: '62yo male complains of 2h acute epigastric tightness radiating to upper back. Associated with mild diaphoresis.',
+        objective: 'BP 158/94, HR 88 regular, SpO2 98% room air. Afebrile.',
+        ehrHistory: ['Type 2 Diabetes Mellitus', 'Essential Hypertension', 'Hyperlipidemia'],
+        aiAlert: 'Atypical Acute Coronary Syndrome presentation pattern detected. High probability of silent ischemia.'
+      },
+      riskFeatures: [
+        { feature: 'Epigastric Pain + Diabetes history', impact: '+35 pts' },
+        { feature: 'Age > 60 with atypical symptom set', impact: '+22 pts' },
+        { feature: 'Elevated Systolic Blood Pressure', impact: '+18 pts' }
+      ],
+      recommendedOrders: [
+        { id: 'ecg', label: 'STAT 12-Lead ECG', checked: true, dept: 'Cardiology' },
+        { id: 'trop', label: 'High-Sensitivity Troponin T (hs-cTnT)', checked: true, dept: 'Laboratory' },
+        { id: 'fbc', label: 'Full Blood Count + Renal Panel', checked: true, dept: 'Laboratory' },
+        { id: 'cxr', label: 'Portable Chest X-Ray (CXR)', checked: false, dept: 'Radiology' }
+      ],
+      status: 'PENDING_REVIEW',
+      assignedRoute: null,
+      ordersExecuted: false
+    },
+    {
+      id: 'PAT-102',
+      name: 'Ahmad, R.',
+      age: 45,
+      gender: 'M',
+      nric: 'S****882B',
+      triageCat: 'P2',
+      riskScore: 92,
+      podId: 2,
+      inQueue: true,
+      dwellMinutes: 4,
+      vitals: { hr: 118, bp: '92/60', spO2: 94, temp: '38.4°C', rr: 24 },
+      flagReason: 'Sepsis alert: Tachycardia + Hypotension + Hyperthermia with hypoxia',
+      audioStream: {
+        sourceLang: 'Malay',
+        transcript: 'Severe shortness of breath since morning, severe shivering chills, coughing up rusty sputum.',
+        highlightKeywords: ['shortness of breath', 'shivering chills', 'rusty sputum']
+      },
+      soap: {
+        subjective: '45yo male presents with 1-day history of high fever, rigors, productive cough with rusty sputum, and dyspnea.',
+        objective: 'HR 118, BP 92/60, SpO2 94% on RA, Temp 38.4°C.',
+        ehrHistory: ['Bronchial Asthma', 'Recent Chemotherapy (3 wks ago)'],
+        aiAlert: 'Sepsis Criteria (qSOFA = 2): High risk of rapid Decompensation secondary to CAP.'
+      },
+      riskFeatures: [
+        { feature: 'SIRS / qSOFA Score high', impact: '+42 pts' },
+        { feature: 'Immunosuppressed history', impact: '+28 pts' }
+      ],
+      recommendedOrders: [
+        { id: 'sepsis_bundle', label: 'STAT Sepsis Workup (Blood Cx, Lactate)', checked: true, dept: 'Laboratory' },
+        { id: 'cxr', label: 'Portable Chest X-Ray', checked: true, dept: 'Radiology' }
+      ],
+      status: 'PENDING_REVIEW',
+      assignedRoute: null,
+      ordersExecuted: false
+    },
+    {
+      id: 'PAT-104',
+      name: 'Tan, K.',
+      age: 34,
+      gender: 'F',
+      nric: 'T****901D',
+      triageCat: 'P3',
+      riskScore: 45,
+      podId: 1,
+      inQueue: false,
+      dwellMinutes: 2,
+      vitals: { hr: 102, bp: '142/88', spO2: 97, temp: '37.6°C', rr: 16 },
+      flagReason: 'Acute localized RLQ pain - Suspected Appendicitis',
+      audioStream: {
+        sourceLang: 'Mandarin',
+        transcript: 'Pain started around navel 6 hours ago and shifted to lower right stomach.',
+        highlightKeywords: ['shifted to lower right stomach']
+      },
+      soap: {
+        subjective: '34yo female with periumbilical pain migrating to RLQ over 6h.',
+        objective: 'BP 142/88, HR 102, SpO2 97%, Temp 37.6°C.',
+        ehrHistory: ['No chronic illness'],
+        aiAlert: 'Alvarado Score: 6 (Possible Acute Appendicitis).'
+      },
+      riskFeatures: [
+        { feature: 'Classic migration of pain to RLQ', impact: '+25 pts' }
+      ],
+      recommendedOrders: [
+        { id: 'fbc_crp', label: 'FBC + CRP + Inflammatory Markers', checked: true, dept: 'Laboratory' },
+        { id: 'us_abd', label: 'Diagnostic Ultrasound Abdomen', checked: true, dept: 'Radiology' }
+      ],
+      status: 'PENDING_REVIEW',
+      assignedRoute: null,
+      ordersExecuted: false
+    },
+    {
+      id: 'PAT-105', name: 'Raj, S.', age: 71, gender: 'M', nric: 'S****411C', triageCat: 'P3', riskScore: 76, podId: 3, inQueue: true, dwellMinutes: 14,
+      vitals: { hr: 96, bp: '136/78', spO2: 93, temp: '37.1°C', rr: 22 },
+      flagReason: 'Progressive SpO2 decline + exertional dyspnea',
+      audioStream: { sourceLang: 'Tamil', transcript: 'More breathless when I walk. I feel tired and light-headed.', highlightKeywords: ['breathless when I walk','light-headed'] },
+      soap: { subjective: '71yo male with worsening exertional dyspnea and fatigue.', objective: 'HR 96, BP 136/78, SpO2 93% RA, RR 22.', ehrHistory: ['COPD','Ischaemic Heart Disease'], aiAlert: 'Moderate deterioration risk due to falling oxygen saturation and cardiopulmonary comorbidity.' },
+      riskFeatures: [{feature:'SpO2 decline to 93%',impact:'+28 pts'},{feature:'Age > 70',impact:'+18 pts'},{feature:'COPD + IHD',impact:'+20 pts'}],
+      recommendedOrders: [{id:'ecg_raj',label:'12-Lead ECG',checked:true,dept:'Cardiology'},{id:'cxr_raj',label:'Chest X-Ray',checked:true,dept:'Radiology'},{id:'vbg_raj',label:'VBG + Electrolytes',checked:false,dept:'Laboratory'}],
+      status:'PENDING_REVIEW', assignedRoute:null, ordersExecuted:false
+    },
+    {
+      id: 'PAT-106', name: 'Lee, M.', age: 26, gender: 'F', nric: 'S****632F', triageCat: 'P3', riskScore: 58, podId: null, inQueue: true, dwellMinutes: 21,
+      vitals: { hr: 104, bp: '118/72', spO2: 99, temp: '37.8°C', rr: 18 },
+      flagReason: 'Persistent abdominal pain + tachycardia; watch for progression',
+      audioStream: { sourceLang: 'English', transcript: 'The pain is getting worse and I vomited twice today.', highlightKeywords: ['getting worse','vomited twice'] },
+      soap: { subjective: '26yo female with worsening lower abdominal pain and vomiting.', objective: 'HR 104, BP 118/72, SpO2 99%, Temp 37.8°C.', ehrHistory: ['No known chronic illness'], aiAlert: 'Watch category: persistent pain with mild tachycardia; reassessment recommended.' },
+      riskFeatures: [{feature:'Persistent/worsening pain',impact:'+20 pts'},{feature:'Tachycardia',impact:'+15 pts'}],
+      recommendedOrders: [{id:'fbc_lee',label:'FBC + CRP',checked:true,dept:'Laboratory'},{id:'urine_lee',label:'Urinalysis + Urine hCG',checked:true,dept:'Laboratory'}],
+      status:'PENDING_REVIEW', assignedRoute:null, ordersExecuted:false
+    },
+    {
+      id: 'PAT-107', name: 'Nur, H.', age: 39, gender: 'F', nric: 'S****224G', triageCat: 'P3', riskScore: 32, podId: null, inQueue: true, dwellMinutes: 8,
+      vitals: { hr: 78, bp: '124/76', spO2: 99, temp: '36.7°C', rr: 16 },
+      flagReason: 'Low-risk ankle injury; stable observations',
+      audioStream: { sourceLang: 'Malay', transcript: 'I twisted my ankle coming down the stairs. I can still walk but it hurts.', highlightKeywords: ['twisted my ankle','still walk'] },
+      soap: { subjective: '39yo female with inversion ankle injury after stairs.', objective: 'Vitals stable. Weight-bearing with pain.', ehrHistory: ['No significant medical history'], aiAlert: 'Low deterioration risk. Suitable for routine P3 pathway if clinical assessment remains reassuring.' },
+      riskFeatures: [{feature:'Stable observations',impact:'Low risk'},{feature:'Able to weight-bear',impact:'Low risk'}],
+      recommendedOrders: [{id:'xray_ankle',label:'Ankle X-Ray if Ottawa criteria met',checked:false,dept:'Radiology'}],
+      status:'PENDING_REVIEW', assignedRoute:null, ordersExecuted:false
+    },
+    {
+      id: 'PAT-108', name: 'Goh, J.', age: 68, gender: 'M', nric: 'S****778H', triageCat: 'P2', riskScore: 97, podId: null, inQueue: true, dwellMinutes: 2,
+      vitals: { hr: 132, bp: '84/52', spO2: 91, temp: '36.2°C', rr: 30 },
+      flagReason: 'Critical deterioration: hypotension + hypoxia + tachycardia',
+      audioStream: { sourceLang: 'Hokkien → English', transcript: 'Very breathless, weak and almost fainted before coming in.', highlightKeywords: ['very breathless','almost fainted'] },
+      soap: { subjective: '68yo male with acute dyspnea, weakness and near-syncope.', objective: 'HR 132, BP 84/52, SpO2 91% RA, RR 30.', ehrHistory: ['Heart Failure','Atrial Fibrillation','CKD'], aiAlert: 'Critical physiology detected. Immediate senior review and resuscitation assessment recommended.' },
+      riskFeatures: [{feature:'SBP < 90',impact:'+40 pts'},{feature:'SpO2 91%',impact:'+25 pts'},{feature:'RR 30 + HR 132',impact:'+25 pts'}],
+      recommendedOrders: [{id:'ecg_goh',label:'STAT 12-Lead ECG',checked:true,dept:'Cardiology'},{id:'bloods_goh',label:'STAT FBC + U&E + VBG/Lactate',checked:true,dept:'Laboratory'},{id:'cxr_goh',label:'Portable Chest X-Ray',checked:true,dept:'Radiology'}],
+      status:'PENDING_REVIEW', assignedRoute:null, ordersExecuted:false
+    }
+  ];
+
+  function Dashboard() {
+    const [patients, setPatients] = useState(INITIAL_PATIENTS);
+    const [selectedPatientId, setSelectedPatientId] = useState('PAT-101');
+    const [searchQuery, setSearchQuery] = useState('');
+    const [queueFilter, setQueueFilter] = useState('ALL');
+    const [activeTab, setActiveTab] = useState('OVERVIEW');
+    const [showAddOrder, setShowAddOrder] = useState(false);
+    const [newOrderName, setNewOrderName] = useState('');
+    const [newOrderDept, setNewOrderDept] = useState('Laboratory');
+    const [acknowledged, setAcknowledged] = useState({});
+    const [resultStates, setResultStates] = useState({});
+    const [actionLogs, setActionLogs] = useState([
+      { id: 1, time: '16:58:12', text: 'APN Dashboard Synced (3 Pods active).' },
+      { id: 2, time: '17:01:40', text: 'AI Risk Engine: Lim, A. re-scored to 88.' }
+    ]);
+    const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString('en-US', { hour12: false }));
+
+    useEffect(() => {
+      const timer = setInterval(() => {
+        setCurrentTime(new Date().toLocaleTimeString('en-US', { hour12: false }));
+      }, 1000);
+      return () => clearInterval(timer);
+    }, []);
+
+    useEffect(() => {
+      if (window.lucide) {
+        window.lucide.createIcons();
+      }
+    });
+
+    const selectedPatient = patients.find(p => p.id === selectedPatientId) || patients[0];
+
+    const handleToggleOrder = (orderId) => {
+      setPatients(prev => prev.map(p => {
+        if (p.id === selectedPatientId) {
+          const updatedOrders = p.recommendedOrders.map(ord => 
+            ord.id === orderId ? { ...ord, checked: !ord.checked } : ord
+          );
+          return { ...p, recommendedOrders: updatedOrders };
+        }
+        return p;
+      }));
+    };
+
+    const handleAddOrder = () => {
+      const label = newOrderName.trim();
+      if (!label) return;
+      setPatients(prev => prev.map(p => p.id === selectedPatientId ? {
+        ...p, recommendedOrders: [...p.recommendedOrders, { id: `custom_${Date.now()}`, label, checked: true, dept: newOrderDept }]
+      } : p));
+      setNewOrderName('');
+      setShowAddOrder(false);
+    };
+
+    const getResultsForPatient = (pat) => {
+      const custom = resultStates[pat.id];
+      if (custom) return custom;
+      return pat.recommendedOrders.map((o, idx) => ({
+        id: o.id,
+        label: o.label,
+        dept: o.dept,
+        status: pat.ordersExecuted ? (idx === 0 ? 'COMPLETED' : 'PENDING') : 'NOT ORDERED',
+        value: pat.ordersExecuted && idx === 0 ? (o.dept === 'Cardiology' ? 'Completed — clinician review required' : o.dept === 'Laboratory' ? 'Result available — review required' : 'Study completed — report pending') : null,
+        abnormal: false
+      }));
+    };
+
+    const handleSimulateResults = () => {
+      const pat = selectedPatient;
+      const results = pat.recommendedOrders.filter(o => o.checked).map((o, idx) => ({
+        id: o.id, label: o.label, dept: o.dept,
+        status: idx < 2 ? 'COMPLETED' : 'PENDING',
+        value: idx === 0 ? (pat.riskScore >= 80 ? 'Abnormal finding — urgent clinical review' : 'Completed — no critical alert') : idx === 1 ? (pat.riskScore >= 80 ? 'Abnormal result flagged ↑' : 'Result available') : null,
+        abnormal: idx < 2 && pat.riskScore >= 80
+      }));
+      setResultStates(prev => ({...prev, [pat.id]: results}));
+      if (pat.riskScore >= 80) {
+        setPatients(prev => prev.map(p => p.id === pat.id ? {...p, riskScore: Math.min(99, p.riskScore + 4)} : p));
+      }
+      const now = new Date().toLocaleTimeString('en-US', { hour12: false });
+      setActionLogs(prev => [{id:Date.now(), time:now, text:`[RESULTS UPDATED] ${pat.name} • new investigation results received and risk re-reviewed`}, ...prev]);
+    };
+
+    const handleExecuteAndRoute = (routeType) => {
+      if (!selectedPatient) return;
+      const checkedOrders = selectedPatient.recommendedOrders.filter(o => o.checked);
+
+      const routeMap = {
+        P3_SUBWAITING: { label: 'P3 Fast-Track / Sub-Waiting', triage: 'P3' },
+        P2_URGENT: { label: 'P2 Upgrade → Urgent / Rapid Assessment Zone (RAZ)', triage: 'P2' },
+        P1_RESUS: { label: 'P1 Upgrade → Resuscitation Bay', triage: 'P1' }
+      };
+      const nextRoute = routeMap[routeType];
+      const previousRoute = selectedPatient.assignedRoute;
+      const previousTriage = selectedPatient.triageCat;
+
+      setPatients(prev => prev.map(p => {
+        if (p.id === selectedPatientId) {
+          return { ...p, triageCat: nextRoute.triage, status: 'ALLOCATED', assignedRoute: nextRoute.label, ordersExecuted: true, inQueue: false };
+        }
+        return p;
+      }));
+
+      const now = new Date().toLocaleTimeString('en-US', { hour12: false });
+      const changeText = previousRoute ? `ROUTE CHANGED: ${previousTriage} / ${previousRoute} → ${nextRoute.triage} / ${nextRoute.label}` : `ALLOCATED: ${nextRoute.triage} / ${nextRoute.label}`;
+      setActionLogs(prev => [
+        { id: Date.now(), time: now, text: `[${changeText}] ${selectedPatient.name} • ${checkedOrders.length} selected directives` },
+        ...prev
+      ]);
+    };
+
+    const flaggedQueue = patients.filter(p => {
+      const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase());
+      if (!matchesSearch) return false;
+      if (queueFilter === 'ACTIONED') return !p.inQueue;
+      if (!p.inQueue) return false;
+      if (queueFilter === 'HIGH') return p.riskScore >= 80;
+      if (queueFilter === 'WATCH') return p.riskScore < 80;
+      if (queueFilter === 'REASSESS') return p.dwellMinutes >= 15 || (p.riskScore >= 60 && p.riskScore < 80);
+      return true;
+    }).sort((a,b) => queueFilter === 'ACTIONED' ? (b.dwellMinutes - a.dwellMinutes) : (b.riskScore - a.riskScore));
+    const highRiskCount = patients.filter(p => p.inQueue && p.riskScore >= 80).length;
+    const waitingCount = patients.filter(p => p.inQueue).length;
+    const reassessCount = patients.filter(p => p.inQueue && (p.dwellMinutes >= 15 || (p.riskScore >= 60 && p.riskScore < 80))).length;
+    const longestWait = Math.max(...patients.filter(p => p.inQueue).map(p => p.dwellMinutes), 0);
+
+    return (
+      <div className="app-shell flex flex-col h-screen w-screen bg-[#070b12] text-slate-100 font-sans overflow-hidden">
+        {/* HEADER */}
+        <header className="h-14 bg-[#0d1424] border-b border-slate-800 px-4 flex items-center justify-between shrink-0">
+          <div className="flex items-center space-x-3">
+            <div className="flex items-center justify-center h-9 w-9 rounded-lg bg-blue-600/20 border border-blue-500/40 text-blue-400">
+              <i data-lucide="activity" className="h-5 w-5 animate-pulse"></i>
+            </div>
+            <div>
+              <h1 className="text-sm font-bold tracking-wider text-slate-100 uppercase">APN CLINICAL CONTROL CENTER</h1>
+              <p className="text-[11px] text-slate-400">Front-End ED Ingestion • AI Risk Engine Active</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 text-[11px] font-mono"><span className="text-slate-300">3/3 PODS</span><span className="text-slate-300">{waitingCount} WAITING</span><span className="text-rose-400 font-bold">{highRiskCount} HIGH RISK</span><span className="text-violet-300">{reassessCount} REASSESS</span><span className="text-amber-300">LONGEST {longestWait}m</span><span className="text-emerald-400">RAZ 4/6</span><span className="text-slate-200">{currentTime} | DAY</span></div>
+        </header>
+
+        {/* 4 QUADRANT GRID */}
+        <div className="desktop-grid flex-1 grid grid-cols-12 grid-rows-12 gap-2.5 p-2.5 overflow-hidden">
+          
+          {/* PANEL A: LIVE PODS */}
+          <section className="col-span-6 row-span-6 bg-[#0c1220] border border-slate-800 rounded-lg flex flex-col overflow-hidden">
+            <div className="h-9 bg-[#11192c] border-b border-slate-800 px-3 flex items-center justify-between">
+              <h2 className="text-xs font-bold uppercase text-slate-200 flex items-center gap-2">
+                <i data-lucide="radio" className="h-4 w-4 text-cyan-400"></i> Panel A: Live Intake Pod Monitor
+              </h2>
+            </div>
+            <div className="pod-grid flex-1 p-2 grid grid-cols-3 gap-2 overflow-hidden">
+              {[1, 2, 3].map(podNum => {
+                const pat = patients.find(p => p.podId === podNum);
+                if (!pat) return <div key={podNum} className="border rounded-lg bg-[#0e1628] border-slate-800 flex flex-col items-center justify-center text-slate-600"><div className="text-xs font-bold">POD {podNum}</div><div className="text-[10px] mt-2">READY / EMPTY</div></div>;
+                const severity = pat.riskScore >= 90 ? 'CRITICAL' : pat.riskScore >= 80 ? 'HIGH' : pat.riskScore >= 60 ? 'WATCH' : 'STABLE';
+                const sevClass = pat.riskScore >= 80 ? 'text-rose-400' : pat.riskScore >= 60 ? 'text-amber-300' : 'text-emerald-400';
+                const hr0 = Math.max(55, pat.vitals.hr - (pat.riskScore >= 80 ? 14 : 6));
+                const hr1 = Math.max(55, pat.vitals.hr - (pat.riskScore >= 80 ? 7 : 3));
+                const spo0 = Math.min(100, pat.vitals.spO2 + (pat.vitals.spO2 < 96 ? 3 : 1));
+                const spo1 = Math.min(100, pat.vitals.spO2 + (pat.vitals.spO2 < 96 ? 1 : 0));
+                return (
+                  <div key={podNum} onClick={() => setSelectedPatientId(pat.id)} className={`pod-card border rounded-lg p-2 cursor-pointer flex flex-col min-h-0 ${pat.id === selectedPatientId ? 'bg-slate-900 border-blue-500' : 'bg-[#0e1628] border-slate-800'}`}>
+                    <div className="flex justify-between items-center text-[10px] font-bold pb-1.5 border-b border-slate-800">
+                      <span>POD {podNum} <span className="text-emerald-400 ml-1">● ACTIVE</span></span>
+                      <span className="font-mono text-slate-400">{String(pat.dwellMinutes).padStart(2,'0')}m</span>
+                    </div>
+                    <div className="pod-identity flex items-center gap-2 py-2">
+                      <div className="h-8 w-8 shrink-0 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] font-bold text-slate-300">{pat.name.split(',')[0].slice(0,1)}{pat.name.split(',')[1]?.trim().slice(0,1)}</div>
+                      <div className="min-w-0 flex-1"><div className="text-xs font-bold truncate">{pat.name} <span className="text-slate-500 font-normal">· {pat.age}{pat.gender}</span></div><div className="flex gap-1 mt-1"><span className="px-1 rounded bg-slate-800 text-[9px] font-bold">{pat.triageCat}</span><span className={`text-[9px] font-bold ${sevClass}`}>AI {pat.riskScore} · {severity}</span></div></div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1 text-[9px] font-mono">
+                      <div className="bg-[#0a101d] rounded p-1.5"><span className="text-slate-500">HR</span><div className={pat.vitals.hr > 110 ? 'text-rose-300 font-bold' : 'text-slate-200'}>{pat.vitals.hr} bpm {pat.vitals.hr > 100 ? '↑' : ''}</div></div>
+                      <div className="bg-[#0a101d] rounded p-1.5"><span className="text-slate-500">BP</span><div className="text-slate-200">{pat.vitals.bp}</div></div>
+                      <div className="bg-[#0a101d] rounded p-1.5"><span className="text-slate-500">SpO2</span><div className={pat.vitals.spO2 < 95 ? 'text-rose-300 font-bold' : 'text-slate-200'}>{pat.vitals.spO2}% {pat.vitals.spO2 < 96 ? '↓' : ''}</div></div>
+                      <div className="bg-[#0a101d] rounded p-1.5"><span className="text-slate-500">RR / TEMP</span><div className="text-slate-200">{pat.vitals.rr} / {pat.vitals.temp}</div></div>
+                    </div>
+                    <div className="pod-trend mt-1.5 bg-[#0a101d] rounded p-1.5 text-[9px] font-mono space-y-0.5"><div className="text-slate-500 font-sans font-bold uppercase tracking-wide">Recent trend</div><div><span className="text-slate-500">HR</span> {hr0} → {hr1} → <span className={pat.vitals.hr > hr1 ? 'text-amber-300' : ''}>{pat.vitals.hr}</span></div><div><span className="text-slate-500">SpO2</span> {spo0}% → {spo1}% → <span className={pat.vitals.spO2 < spo1 ? 'text-amber-300' : ''}>{pat.vitals.spO2}%</span></div></div>
+                    <div className="mt-1.5 flex items-center justify-between text-[9px]"><span className="text-cyan-300">🎙 {pat.audioStream.sourceLang} → English</span><span className="text-emerald-400">✓ AI HISTORY</span></div>
+                    <div className={`mt-auto pt-1.5 text-[9px] font-bold ${sevClass}`}>{pat.riskScore >= 80 ? '● APN REVIEW REQUIRED' : pat.riskScore >= 60 ? '● APN REVIEW RECOMMENDED' : '✓ NO URGENT APN ACTION'}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* PANEL B: AI RISK QUEUE */}
+          <section className="col-span-6 row-span-6 bg-[#0c1220] border border-slate-800 rounded-lg flex flex-col overflow-hidden">
+            <div className="h-9 bg-[#11192c] border-b border-slate-800 px-3 flex items-center justify-between">
+              <h2 className="text-xs font-bold uppercase text-slate-200 flex items-center gap-2">
+                <i data-lucide="shield-alert" className="h-4 w-4 text-rose-400"></i> Panel B: Priority Queue
+              </h2>
+            </div>
+            <div className="p-2 border-b border-slate-800 space-y-2">
+              <div className="flex gap-1">{['ALL','HIGH','WATCH','REASSESS','ACTIONED'].map(f => <button key={f} onClick={() => setQueueFilter(f)} className={`px-2 py-1 rounded text-[10px] font-bold border ${queueFilter===f ? 'bg-blue-600/20 border-blue-500 text-blue-300' : 'border-slate-800 text-slate-500'}`}>{f}</button>)}</div>
+              <input 
+                type="text" 
+                placeholder="Search patient..." 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-slate-200"
+              />
+            </div>
+            <div className="flex-1 p-2.5 overflow-y-auto space-y-2">
+              {flaggedQueue.map(pat => (
+                <div 
+                  key={pat.id} 
+                  onClick={() => setSelectedPatientId(pat.id)}
+                  className={`p-2.5 rounded border cursor-pointer ${
+                    pat.id === selectedPatientId ? 'bg-slate-900 border-blue-500' : 'bg-[#0e1628] border-slate-800'
+                  }`}
+                >
+                  <div className="flex justify-between items-center text-xs font-bold">
+                    <span className="text-slate-100">{pat.name} ({pat.triageCat})</span>
+                    <span className={`font-mono ${pat.riskScore >= 80 ? 'text-rose-400' : 'text-amber-300'}`}>AI {pat.riskScore}/100</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1">{pat.flagReason}</p>
+                  {pat.inQueue ? (
+                    <div className="flex justify-between mt-2 text-[10px]"><span className="text-amber-300">Waiting {pat.dwellMinutes}m</span><span className={acknowledged[pat.id] ? "text-emerald-400" : "text-cyan-400"}>{acknowledged[pat.id] ? "ACKNOWLEDGED" : "NEW FLAG"}</span>{(pat.dwellMinutes >= 15 || (pat.riskScore >= 60 && pat.riskScore < 80)) && <span className="text-violet-300 font-bold">REASSESS DUE</span>}</div>
+                  ) : (
+                    <div className="mt-2 rounded bg-emerald-500/5 border border-emerald-500/20 px-2 py-1.5 text-[10px]"><div className="text-emerald-400 font-bold">✓ ACTIONED</div><div className="text-slate-400 mt-0.5">Current: {pat.triageCat} • {pat.assignedRoute}</div><div className="text-blue-300 mt-1">Select patient to review or change allocation</div></div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* PANEL C: DEEP DIVE */}
+          <section className="col-span-6 row-span-6 bg-[#0c1220] border border-slate-800 rounded-lg flex flex-col overflow-hidden">
+            <div className="h-9 bg-[#11192c] border-b border-slate-800 px-3 flex items-center justify-between">
+              <h2 className="text-xs font-bold uppercase text-slate-200 flex items-center gap-2">
+                <i data-lucide="file-text" className="h-4 w-4 text-blue-400"></i> Panel C: Patient Overview & History
+              </h2>
+            </div>
+            <div className="flex-1 p-3 overflow-y-auto space-y-2 text-xs">
+              <div className="flex gap-1">{['OVERVIEW','FULL CONVERSATION','EHR','AI EVIDENCE','RESULTS','TIMELINE'].map(t => <button key={t} onClick={() => setActiveTab(t)} className={`px-2 py-1 rounded text-[10px] border ${activeTab===t ? 'bg-blue-600/20 border-blue-500 text-blue-300' : 'border-slate-800 text-slate-500'}`}>{t}</button>)}</div>
+              <div className="bg-[#0f172a] p-2 rounded border border-slate-800 flex justify-between">
+                <div>
+                  <span className="font-bold text-slate-100">{selectedPatient.name}</span> ({selectedPatient.age}{selectedPatient.gender})
+                  <div className="text-[10px] text-slate-400">NRIC: {selectedPatient.nric}</div>
+                </div>
+                <div className="text-right font-mono font-bold text-rose-400">Risk: {selectedPatient.riskScore}/100</div>
+              </div>
+              <div className="bg-[#0e1628] p-2 rounded border border-slate-800">
+                {activeTab === 'OVERVIEW' && <><div className="font-bold text-slate-300">Subjective (Voice NLP)</div><p className="text-slate-400 text-[11px]">{selectedPatient.soap.subjective}</p><div className="font-bold text-slate-300 mt-2">Objective</div><p className="text-slate-400 text-[11px]">{selectedPatient.soap.objective}</p><div className="font-bold text-amber-300 mt-2">AI concern</div><p className="text-amber-300 text-[11px]">{selectedPatient.soap.aiAlert}</p></>}
+                {activeTab === 'FULL CONVERSATION' && <div className="space-y-2"><div className="flex items-center justify-between"><div><div className="font-bold text-slate-200">Full intake conversation</div><div className="text-[10px] text-slate-500">{selectedPatient.audioStream.sourceLang} → English • patient wording preserved</div></div><span className="text-[9px] text-cyan-300 border border-cyan-700/50 rounded px-1.5 py-0.5">🎙 VERBATIM</span></div><div className="space-y-2"><div className="rounded border border-blue-900/60 bg-blue-500/5 p-2"><div className="text-[9px] font-bold text-blue-300 mb-1">SN / SSN</div><div className="text-[11px] text-slate-300">Can you tell me what brought you to the Emergency Department today?</div></div><div className="rounded border border-slate-700 bg-[#090f1b] p-2"><div className="text-[9px] font-bold text-cyan-300 mb-1">PATIENT</div><div className="text-[12px] leading-relaxed text-slate-100">“{selectedPatient.audioStream.transcript}”</div></div><div className="rounded border border-blue-900/60 bg-blue-500/5 p-2"><div className="text-[9px] font-bold text-blue-300 mb-1">SN / SSN</div><div className="text-[11px] text-slate-300">Has it been getting worse? Is there anything else you noticed when it happens?</div></div><div className="rounded border border-slate-700 bg-[#090f1b] p-2"><div className="text-[9px] font-bold text-cyan-300 mb-1">PATIENT</div><div className="text-[11px] leading-relaxed text-slate-200">“I don't really know how to describe it properly. I just feel quite unwell and it doesn't feel normal for me.”</div></div></div><div className="rounded border border-amber-700/30 bg-amber-500/5 p-2 text-[10px] text-slate-400"><span className="font-bold text-amber-300">Why keep this?</span> The APN can return to the patient's natural wording when the structured summary loses nuance. AI-generated interpretation remains separate in Overview and AI Evidence.</div></div>}
+                {activeTab === 'EHR' && <><div className="font-bold text-slate-300 mb-2">Relevant EHR history</div>{selectedPatient.soap.ehrHistory.map(x => <div className="text-[11px] text-slate-400 py-1 border-b border-slate-800" key={x}>{x}</div>)}</>}
+                {activeTab === 'AI EVIDENCE' && <><div className="font-bold text-slate-300 mb-2">Why this patient was flagged</div>{selectedPatient.riskFeatures.map(x => <div className="flex justify-between text-[11px] py-1 border-b border-slate-800" key={x.feature}><span className="text-slate-400">{x.feature}</span><span className="text-rose-400 font-mono">{x.impact}</span></div>)}<div className="mt-2 text-[10px] text-slate-500">Source language: {selectedPatient.audioStream.sourceLang} • APN verification required</div></>}
+                {activeTab === 'RESULTS' && <div className="space-y-2"><div className="flex justify-between items-center"><div><div className="font-bold text-slate-200">Investigations & results surveillance</div><div className="text-[10px] text-slate-500">Closed-loop tracking after APN authorization</div></div><button onClick={handleSimulateResults} className="px-2 py-1 rounded border border-violet-500/50 bg-violet-500/10 text-violet-300 text-[9px] font-bold">SIMULATE RESULT RETURN</button></div>{getResultsForPatient(selectedPatient).map(r => <div key={r.id} className="rounded border border-slate-800 bg-[#090f1b] p-2"><div className="flex justify-between gap-2"><div><div className="text-[11px] font-bold text-slate-200">{r.label}</div><div className="text-[9px] text-slate-500">{r.dept}</div></div><span className={`text-[9px] font-bold ${r.status==='COMPLETED' ? (r.abnormal?'text-rose-400':'text-emerald-400') : r.status==='PENDING'?'text-amber-300':'text-slate-500'}`}>{r.status}</span></div>{r.value && <div className={`mt-1 text-[10px] ${r.abnormal?'text-rose-300':'text-slate-400'}`}>{r.abnormal?'⚠ ':''}{r.value}</div>}</div>)}{selectedPatient.ordersExecuted && <div className="rounded border border-blue-700/30 bg-blue-500/5 p-2"><div className="text-[10px] font-bold text-blue-300">AI CONTINUOUS RE-RISK</div><div className="text-[10px] text-slate-400 mt-1">New results and vital changes are incorporated into the risk review. Any escalation remains subject to APN clinical verification.</div></div>}</div>}
+                {activeTab === 'TIMELINE' && <div className="space-y-1 text-[11px] text-slate-400"><div>17:31 — Registered</div><div>17:34 — Triage {selectedPatient.triageCat}</div><div>17:38 — AI history synthesized</div><div>17:40 — Risk recalculated → {selectedPatient.riskScore}</div><div>17:41 — Awaiting APN decision</div></div>}
+              </div>
+              {!acknowledged[selectedPatient.id] && <button onClick={() => setAcknowledged(a => ({...a,[selectedPatient.id]:true}))} className="w-full border border-cyan-600/50 bg-cyan-600/10 text-cyan-300 rounded py-1.5 text-[11px] font-bold">ACKNOWLEDGE AI FLAG</button>}
+            </div>
+          </section>
+
+          {/* PANEL D: PROTOCOL LAUNCHER */}
+          <section className="col-span-6 row-span-6 bg-[#0c1220] border border-slate-800 rounded-lg flex flex-col overflow-hidden">
+            <div className="h-9 bg-[#11192c] border-b border-slate-800 px-3 flex items-center justify-between">
+              <h2 className="text-xs font-bold uppercase text-slate-200 flex items-center gap-2">
+                <i data-lucide="zap" className="h-4 w-4 text-amber-400"></i> Panel D: APN Protocol Launcher
+              </h2>
+            </div>
+            <div className="flex-1 min-h-0 flex flex-col">
+              <div className="panel-body-scroll flex-1 p-3 pb-2">{selectedPatient.assignedRoute && <div className="mb-2 p-2 bg-emerald-500/5 border border-emerald-500/30 rounded text-[10px]"><div className="flex justify-between"><span className="font-bold text-emerald-400">CURRENT ALLOCATION</span><span className="font-mono text-emerald-300">{selectedPatient.triageCat}</span></div><div className="text-slate-300 mt-1">{selectedPatient.assignedRoute}</div><div className="text-amber-300 mt-1">You can change the allocation below. The change will be recorded in the action log.</div></div>}<div className="mb-2 p-2 bg-[#070c18] border border-slate-800 rounded text-[10px]"><div className="font-bold text-slate-300">SAFETY PRE-CHECK</div><div className="text-emerald-400 mt-1">✓ Identity matched &nbsp; ✓ No duplicate active orders</div><div className="text-amber-300">⚠ Clinical decision support — APN verification required</div></div><div className="space-y-1.5">
+                {selectedPatient.recommendedOrders.map(ord => (
+                  <label key={ord.id} className="flex items-center justify-between bg-slate-900 p-2 rounded border border-slate-800 text-xs cursor-pointer">
+                    <div className="flex items-center space-x-2">
+                      <input 
+                        type="checkbox" 
+                        checked={ord.checked} 
+                        onChange={() => handleToggleOrder(ord.id)} 
+                        className="rounded bg-slate-800 border-slate-700"
+                      />
+                      <span>{ord.label}</span>
+                    </div>
+                    <span className="text-[10px] text-slate-500">{ord.dept}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="mt-2">
+                {!showAddOrder ? (
+                  <button onClick={() => setShowAddOrder(true)} className="w-full border border-dashed border-blue-500/50 text-blue-300 bg-blue-500/5 hover:bg-blue-500/10 rounded p-2 text-[11px] font-bold">+ ADD LAB / SCAN / INVESTIGATION</button>
+                ) : (
+                  <div className="grid grid-cols-12 gap-1.5 bg-[#070c18] border border-blue-500/30 rounded p-2">
+                    <input autoFocus value={newOrderName} onChange={e => setNewOrderName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddOrder()} placeholder="e.g. CT Brain, D-dimer, Lipase..." className="col-span-7 bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-[11px]" />
+                    <select value={newOrderDept} onChange={e => setNewOrderDept(e.target.value)} className="col-span-3 bg-slate-900 border border-slate-700 rounded px-1 text-[10px]"><option>Laboratory</option><option>Radiology</option><option>Cardiology</option><option>Point-of-Care</option><option>Other</option></select>
+                    <button onClick={handleAddOrder} className="col-span-1 bg-blue-600 rounded text-[10px] font-bold">ADD</button>
+                    <button onClick={() => setShowAddOrder(false)} className="col-span-1 bg-slate-700 rounded text-[10px]">×</button>
+                  </div>
+                )}
+              </div>
+              </div>
+
+              <div className="protocol-footer px-3 pb-3">
+              <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800">
+                <button onClick={() => handleExecuteAndRoute('P3_SUBWAITING')} className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold p-2 rounded text-[11px]">
+                  SET / CHANGE → P3
+                </button>
+                <button onClick={() => handleExecuteAndRoute('P2_URGENT')} className="bg-amber-600 hover:bg-amber-500 text-white font-bold p-2 rounded text-[11px]">
+                  SET / CHANGE → P2 / RAZ
+                </button>
+                <button onClick={() => handleExecuteAndRoute('P1_RESUS')} className="bg-rose-700 hover:bg-rose-600 text-white font-bold p-2 rounded text-[11px]">
+                  SET / CHANGE → P1 / RESUS
+                </button>
+              </div>
+
+              <div className="bg-[#070c18] border border-slate-800 p-1.5 text-[10px] font-mono text-slate-400 h-12 overflow-y-auto rounded mt-2">
+                {actionLogs.map(log => (
+                  <div key={log.id}>[{log.time}] {log.text}</div>
+                ))}
+              </div>
+              </div>
+            </div>
+          </section>
+
+        </div>
+<footer className="border-t border-slate-400 py-2 sm:py-3 text-center text-xs text-slate-250 no-print shrink-0 px-2">
+        <p>NUS Leadership • A0301686A Group</p>
+      </footer>
+      </div>
+    );
+  }
+
+  const root = ReactDOM.createRoot(document.getElementById('root'));
+  root.render(<Dashboard />);
+</script>
+
+</body>
+</html>
